@@ -6,6 +6,10 @@ totals by category, region performance vs. the prior period, discount/margin ris
 underperformance flags, and a plain-language summary — plus a way to ask questions
 about the data in plain English.
 
+**Live report:** https://jonathanpatinopursuit.github.io/sales-organizer/
+(publishing this is a manual step — see [Publishing the live report](#publishing-the-live-report) —
+so it only ever shows a report you've explicitly chosen to make public.)
+
 ## What it does
 
 Point it at one or more weekly Excel exports and it will:
@@ -73,6 +77,22 @@ an HTML page to `reports/`:
   directly in a browser
 - `reports/latest.xlsx` / `reports/latest.html` — always overwritten with the
   newest report, so you can bookmark one link/file
+
+## Publishing the live report
+
+This repo is **public**, so `reports/` is deliberately gitignored — nothing
+generated from your real sales data is ever pushed automatically. When you
+*do* want the live link (above) to reflect your latest report, publish it
+explicitly:
+
+```bash
+./scripts/publish_report.sh
+```
+
+This copies `reports/latest.html` to `docs/index.html`, commits, and pushes —
+GitHub Pages serves whatever is in `docs/` at
+https://jonathanpatinopursuit.github.io/sales-organizer/. Only run this when
+`reports/latest.html` contains data you're OK with being publicly visible.
 
 ## Asking questions
 
