@@ -1,0 +1,34 @@
+# Data files (weekly exports dropped by the user)
+data/*
+!data/.gitkeep
+
+# Generated reports
+reports/*
+!reports/.gitkeep
+
+# Excel/Office temp & lock files
+~$*.xlsx
+~$*.xls
+*.xlsx#
+*.tmp
+
+# OS junk
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Editor
+.vscode/
+.idea/
