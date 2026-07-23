@@ -31,18 +31,28 @@ import generate_report
 st.set_page_config(page_title="Sales Organizer", page_icon="📊", layout="wide")
 
 st.title("📊 Sales Organizer")
-st.write(
-    "Upload your weekly sales export (`.xlsx`) below to generate a report -- "
-    "no command line required."
-)
 
-uploaded_file = st.file_uploader("Weekly sales export", type=["xlsx"])
+# --- Step 1: upload. Step 2: an explicit Generate Report click -- nothing
+# else competes for attention above these two actions. Report state lives in
+# session_state so it survives the reruns that later download-button clicks
+# trigger, and resets if a different file is uploaded.
+uploaded_file = st.file_uploader("Upload Data (.xlsx)", type=["xlsx"])
+
+if uploaded_file is not None and st.session_state.get("uploaded_name") != uploaded_file.name:
+    st.session_state["generated"] = False
+    st.session_state["uploaded_name"] = uploaded_file.name
 
 if uploaded_file is None:
     st.info(
         "Drop a `.xlsx` file above to get started. Expected columns: "
         "date, customer, product, category, region, quantity, price, discount, profit."
     )
+    st.stop()
+
+if st.button("Generate Report", type="primary", use_container_width=True):
+    st.session_state["generated"] = True
+
+if not st.session_state.get("generated"):
     st.stop()
 
 # --- Run the file through the exact same pipeline the CLI uses ---
@@ -86,7 +96,7 @@ report_html = generate_report.render_html(
 if issues:
     st.warning(f"⚠ {len(issues)} data quality issue(s) were found -- see the banner in the report below.")
 
-components.html(report_html, height=1600, scrolling=True)
+components.html(report_html, height=900, scrolling=True)
 
 # --- Downloads, using the same write_excel()/render_html() the CLI uses ---
 xlsx_buffer = io.BytesIO()

@@ -215,16 +215,17 @@ def _stat_tile(label, value, delta=None):
       </div>"""
 
 
-def _flag_card(flag):
+def _flag_line(flag):
+    """One plain-language sentence per flag (e.g. 'Sofa: margin only 6.7% and
+    revenue down 18.2% vs prior period.') instead of a multi-part card, so
+    Flags stays scannable at a glance rather than a dense table."""
     icon = "⛔" if flag["severity"] == "critical" else "⚠"
-    return f"""
-      <div class="flag-card flag-{flag['severity']}">
-        <div class="flag-icon">{icon}</div>
-        <div>
-          <div class="flag-title">{flag['dimension'].title()}: {flag['name']}</div>
-          <div class="flag-reason">{flag['reason']}</div>
-        </div>
-      </div>"""
+    reason = flag["reason"].replace("; ", " and ")
+    return (
+        f'<div class="flag-line flag-line-{flag["severity"]}">'
+        f'{icon} <strong>{flag["dimension"].title()}: {flag["name"]}</strong> — {reason}.'
+        f'</div>'
+    )
 
 
 def _df_to_table(df, columns, headers, formatters, name_col=None, note_col=None):
@@ -275,11 +276,13 @@ def render_html(summary_text, current_period, prior_period, generated_at,
 
     data_quality_html = render_dq_banner(issues, halts)
 
+    # Only the three headline numbers up top -- everything else (including a
+    # flags count) is either shown as its own section below or cut, so the
+    # first thing a user sees is three big numbers, not four competing tiles.
     stat_tiles = "".join([
         _stat_tile("Total Revenue", _fmt_money(total_revenue), revenue_change),
         _stat_tile("Total Profit", _fmt_money(total_profit)),
         _stat_tile("Overall Margin", f"{overall_margin:.1f}%"),
-        _stat_tile("Flags Raised", str(len(flags))),
     ])
 
     max_cat_rev = category_df["revenue"].max() if not category_df.empty else 0
@@ -313,7 +316,7 @@ def render_html(summary_text, current_period, prior_period, generated_at,
             name_col=name_col, note_col="dq_note",
         )
 
-    flags_html = "".join(_flag_card(f) for f in flags) if flags else '<p class="muted">No flags raised this period.</p>'
+    flags_html = "".join(_flag_line(f) for f in flags) if flags else '<p class="muted">No flags raised this period.</p>'
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -370,11 +373,11 @@ def render_html(summary_text, current_period, prior_period, generated_at,
   .dq-flag {{ cursor: help; color: var(--status-warning); font-size: 0.85em; margin-left: 4px; }}
   h2 {{ font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.04em;
         color: var(--text-secondary); margin: 36px 0 12px; }}
-  .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
-  .stat-tile {{ background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }}
-  .stat-label {{ color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: .03em; }}
-  .stat-value {{ font-size: 1.6rem; font-weight: 600; margin-top: 4px; }}
-  .stat-delta {{ margin-top: 6px; font-size: 0.85rem; }}
+  .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }}
+  .stat-tile {{ background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }}
+  .stat-label {{ color: var(--text-secondary); font-size: 0.85rem; text-transform: uppercase; letter-spacing: .03em; }}
+  .stat-value {{ font-size: 2.4rem; font-weight: 700; margin-top: 6px; }}
+  .stat-delta {{ margin-top: 8px; font-size: 0.9rem; }}
   .delta-up {{ color: var(--delta-good); font-weight: 600; }}
   .delta-down {{ color: var(--delta-bad); font-weight: 600; }}
   .muted {{ color: var(--text-muted); }}
@@ -389,15 +392,18 @@ def render_html(summary_text, current_period, prior_period, generated_at,
   th {{ background: var(--text-primary); color: var(--surface-1); font-weight: 600; }}
   tr:last-child td {{ border-bottom: none; }}
   .risk-badge {{ color: var(--status-warning); font-weight: 600; }}
-  .flag-card {{ display: flex; gap: 12px; align-items: flex-start; background: var(--surface-1);
-                border: 1px solid var(--border); border-left: 4px solid var(--status-warning);
-                border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; }}
-  .flag-critical {{ border-left-color: var(--status-critical); }}
-  .flag-icon {{ font-size: 1.1rem; }}
-  .flag-title {{ font-weight: 600; }}
-  .flag-reason {{ color: var(--text-secondary); font-size: 0.88rem; margin-top: 2px; }}
-  .cols-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }}
-  @media (max-width: 720px) {{ .cols-2 {{ grid-template-columns: 1fr; }} }}
+  .flag-line {{ background: var(--surface-1); border: 1px solid var(--border);
+                border-left: 4px solid var(--status-warning); border-radius: 8px;
+                padding: 10px 14px; margin-bottom: 6px; font-size: 0.92rem; }}
+  .flag-line-critical {{ border-left-color: var(--status-critical); }}
+  details.section {{ background: var(--surface-1); border: 1px solid var(--border);
+                      border-radius: 10px; margin: 12px 0; overflow: hidden; }}
+  details.section summary {{ cursor: pointer; padding: 14px 18px; font-weight: 600;
+                              list-style: none; }}
+  details.section summary::-webkit-details-marker {{ display: none; }}
+  details.section summary::before {{ content: "▸  "; }}
+  details.section[open] summary::before {{ content: "▾  "; }}
+  details.section .section-body {{ padding: 4px 18px 18px; }}
 </style>
 </head>
 <body>
@@ -411,31 +417,39 @@ def render_html(summary_text, current_period, prior_period, generated_at,
   {data_quality_html}
   <div class="summary">{summary_text}</div>
 
-  <h2>Overview</h2>
   <div class="stat-grid">{stat_tiles}</div>
-
-  <div class="cols-2">
-    <div>
-      <h2>Revenue by Category</h2>
-      {category_bars if category_bars else '<p class="muted">No data.</p>'}
-    </div>
-    <div>
-      <h2>Revenue by Region</h2>
-      {region_bars if region_bars else '<p class="muted">No data.</p>'}
-    </div>
-  </div>
-
-  <h2>Region: Current vs. Prior Period</h2>
-  {region_table}
-
-  <h2>Biggest Discounts by Product</h2>
-  {discount_table(discount_product_df)}
-
-  <h2>Biggest Discounts by Category</h2>
-  {discount_table(discount_category_df)}
 
   <h2>Flags</h2>
   {flags_html}
+
+  <details class="section">
+    <summary>Revenue by Category</summary>
+    <div class="section-body">
+      {category_bars if category_bars else '<p class="muted">No data.</p>'}
+    </div>
+  </details>
+
+  <details class="section">
+    <summary>Revenue by Region</summary>
+    <div class="section-body">
+      {region_bars if region_bars else '<p class="muted">No data.</p>'}
+      {region_table}
+    </div>
+  </details>
+
+  <details class="section">
+    <summary>Biggest Discounts by Product</summary>
+    <div class="section-body">
+      {discount_table(discount_product_df)}
+    </div>
+  </details>
+
+  <details class="section">
+    <summary>Biggest Discounts by Category</summary>
+    <div class="section-body">
+      {discount_table(discount_category_df)}
+    </div>
+  </details>
 </div>
 </div>
 </body>
