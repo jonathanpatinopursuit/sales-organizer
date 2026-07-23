@@ -124,7 +124,7 @@ def render_upload_page(error: str | None = None) -> str:
   <form method="POST" action="/sample" style="display:contents;">
     <div class="sample-row">
       <span>NO DATA ON HAND?</span>
-      <button class="sample-link" type="submit">print sample report</button>
+      <button class="sample-link" type="submit">generate a sample report</button>
     </div>
   </form>
   <div class="barcode"></div>
