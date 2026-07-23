@@ -22,13 +22,20 @@ def find_data_files(data_dir: str = DATA_DIR) -> list[str]:
     return sorted(files)
 
 
-def load_data(data_dir: str = DATA_DIR) -> tuple[pd.DataFrame, list[str]]:
+EMPTY_COLUMNS = REQUIRED_COLUMNS + ["__source_file", "revenue", "margin", "period"]
+
+
+def load_data(data_dir: str = DATA_DIR) -> tuple[pd.DataFrame, list[dict], list[str]]:
     """Load, validate, and normalize every Excel export found in data_dir.
 
-    Returns (data, warnings) — warnings is a flat list of data-quality
-    messages (skipped rows, clamped discounts, duplicates) meant to be
-    surfaced in the report's data-quality banner. Missing required columns
-    or a file with too many unparseable dates raise ValueError and halt.
+    Returns (data, issues, halts):
+      - issues: non-fatal data-quality dicts from validate_data.validate()
+        (skipped rows, clamped discounts, duplicates) for the report's banner.
+      - halts: messages for files that were rejected outright (missing
+        required columns, or too many unparseable dates). A halted file is
+        excluded and the run continues with whatever files remain valid —
+        it does not crash the whole run; the halt is surfaced in the report
+        instead.
     """
     files = find_data_files(data_dir)
     if not files:
@@ -38,17 +45,19 @@ def load_data(data_dir: str = DATA_DIR) -> tuple[pd.DataFrame, list[str]]:
         )
 
     frames = []
-    warnings: list[str] = []
+    issues: list[dict] = []
+    halts: list[str] = []
     for f in files:
         filename = os.path.basename(f)
         df = pd.read_excel(f)
         df.columns = [str(c).strip().lower() for c in df.columns]
         missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
         if missing:
-            raise ValueError(
+            halts.append(
                 f"{filename} is missing expected column(s): {', '.join(missing)}. "
                 f"Expected columns: {', '.join(REQUIRED_COLUMNS)}"
             )
+            continue
         df = df[REQUIRED_COLUMNS].copy()
 
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -63,11 +72,18 @@ def load_data(data_dir: str = DATA_DIR) -> tuple[pd.DataFrame, list[str]]:
         if (df["discount"] > 1).any():
             df["discount"] = df["discount"].where(df["discount"] <= 1, df["discount"] / 100.0)
 
-        df, file_warnings = validate(df, filename)
-        warnings.extend(file_warnings)
+        try:
+            df, file_issues = validate(df, filename)
+        except ValueError as e:
+            halts.append(str(e))
+            continue
+        issues.extend(file_issues)
 
         df["__source_file"] = filename
         frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(columns=EMPTY_COLUMNS), issues, halts
 
     data = pd.concat(frames, ignore_index=True)
 
@@ -76,18 +92,25 @@ def load_data(data_dir: str = DATA_DIR) -> tuple[pd.DataFrame, list[str]]:
 
     # validate() only catches duplicates within a single file; also check
     # across files, in case the same export got saved under two filenames.
+    cross_file_dupe_mask = data.duplicated(subset=REQUIRED_COLUMNS, keep=False)
     cross_file_dupes = int(data.duplicated(subset=REQUIRED_COLUMNS).sum())
     if cross_file_dupes:
-        warnings.append(
-            f"Found {cross_file_dupes} row(s) duplicated across multiple files in data/ "
-            f"— check for the same export saved under more than one filename."
-        )
+        issues.append({
+            "level": "warn",
+            "message": (
+                f"Found {cross_file_dupes} row(s) duplicated across multiple files in data/ "
+                f"— check for the same export saved under more than one filename."
+            ),
+            "count": cross_file_dupes,
+            "products": sorted(set(data.loc[cross_file_dupe_mask, "product"])),
+            "categories": sorted(set(data.loc[cross_file_dupe_mask, "category"])),
+        })
 
     data["revenue"] = data["quantity"] * data["price"] * (1 - data["discount"])
     data["margin"] = (data["profit"] / data["revenue"].replace(0, pd.NA)).astype(float)
     data["period"] = data["date"].dt.to_period("M")
 
-    return data.sort_values("date").reset_index(drop=True), warnings
+    return data.sort_values("date").reset_index(drop=True), issues, halts
 
 
 def current_and_prior_period(data: pd.DataFrame):

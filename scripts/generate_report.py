@@ -47,7 +47,7 @@ COLOR_GOOD = "#0ca30c"
 
 def write_excel(path, summary_text, current_period, prior_period,
                  category_df, region_df, discount_product_df, discount_category_df, flags_df,
-                 warnings=()):
+                 issues=(), halts=(), adjusted_products=frozenset(), adjusted_categories=frozenset()):
     with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
         workbook = writer.book
 
@@ -64,7 +64,12 @@ def write_excel(path, summary_text, current_period, prior_period,
         good_fmt = workbook.add_format({"font_color": COLOR_GOOD_TEXT, "bold": True})
         bad_fmt = workbook.add_format({"font_color": COLOR_CRITICAL, "bold": True})
         wrap_fmt = workbook.add_format({"text_wrap": True, "valign": "top"})
-        warn_header_fmt = workbook.add_format({"bold": True, "font_color": COLOR_WARNING})
+        halt_fmt = workbook.add_format({"bold": True, "font_color": "#ffffff", "bg_color": COLOR_CRITICAL})
+        warn_fmt = workbook.add_format({"bold": True, "font_color": "#7a5b00", "bg_color": "#fef9c3"})
+        skip_fmt = workbook.add_format({"bold": True, "font_color": COLOR_INK_SECONDARY, "bg_color": "#f3f4f6"})
+        warn_text_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "bg_color": "#fef9c3"})
+        skip_text_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "bg_color": "#f3f4f6"})
+        halt_text_fmt = workbook.add_format({"text_wrap": True, "valign": "top", "bg_color": "#fee2e2"})
 
         # --- Summary sheet ---
         ws = workbook.add_worksheet("Summary")
@@ -75,14 +80,31 @@ def write_excel(path, summary_text, current_period, prior_period,
         ws.write("A4", summary_text, wrap_fmt)
         ws.set_row(3, 60)
 
-        next_row = 5
-        if warnings:
-            ws.write(next_row, 0, f"Data Quality — {len(warnings)} item(s)", warn_header_fmt)
-            warn_text = "\n".join(f"⚠ {w}" for w in warnings)
-            ws.write(next_row + 1, 0, warn_text, wrap_fmt)
-            ws.set_row(next_row + 1, 16 * len(warnings) + 10)
+        warn_issues = [i for i in issues if i["level"] == "warn"]
+        skip_issues = [i for i in issues if i["level"] == "skip"]
 
-        def write_table(df, sheet_name, pct_cols=(), money_cols=(), plain_pct_cols=()):
+        next_row = 5
+        if halts:
+            ws.write(next_row, 0, f"🚫 HALT — {len(halts)} file(s) rejected", halt_fmt)
+            text = "\n".join(f"🚫 {h}" for h in halts)
+            ws.write(next_row + 1, 0, text, halt_text_fmt)
+            ws.set_row(next_row + 1, 16 * len(halts) + 10)
+            next_row += 2
+        if warn_issues:
+            ws.write(next_row, 0, f"⚠ Warnings — {len(warn_issues)} item(s)", warn_fmt)
+            text = "\n".join(f"⚠ {w['message']}" for w in warn_issues)
+            ws.write(next_row + 1, 0, text, warn_text_fmt)
+            ws.set_row(next_row + 1, 16 * len(warn_issues) + 10)
+            next_row += 2
+        if skip_issues:
+            total_skipped = sum(s["count"] for s in skip_issues)
+            ws.write(next_row, 0, f"⬜ Skipped — {total_skipped} row(s)", skip_fmt)
+            text = "\n".join(f"⬜ {s['message']}" for s in skip_issues)
+            ws.write(next_row + 1, 0, text, skip_text_fmt)
+            ws.set_row(next_row + 1, 16 * len(skip_issues) + 10)
+            next_row += 2
+
+        def write_table(df, sheet_name, pct_cols=(), money_cols=(), plain_pct_cols=(), flag_col=None, flag_names=frozenset()):
             df = df.copy()
             df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=1)
             ws = writer.sheets[sheet_name]
@@ -106,16 +128,24 @@ def write_excel(path, summary_text, current_period, prior_period,
                                        {"type": "cell", "criteria": "<", "value": 0, "format": bad_fmt})
                 ws.conditional_format(f"{col_letter}{first_row}:{col_letter}{last_row}",
                                        {"type": "cell", "criteria": ">=", "value": 0, "format": good_fmt})
+            # inline flag: mark rows whose name appears in flag_names as data-adjusted
+            if flag_col and flag_col in df.columns and flag_names:
+                col_idx = list(df.columns).index(flag_col)
+                flag_cell_fmt = workbook.add_format({"font_color": COLOR_WARNING, "italic": True})
+                for row_idx, val in enumerate(df[flag_col]):
+                    if val in flag_names:
+                        ws.write(2 + row_idx, col_idx, f"{val}  ⚠ data adjusted", flag_cell_fmt)
             return ws
 
         write_table(category_df, "By Category", pct_cols=["pct_change"],
-                    money_cols=["revenue", "profit", "prior_revenue"], plain_pct_cols=["margin", "avg_discount"])
+                    money_cols=["revenue", "profit", "prior_revenue"], plain_pct_cols=["margin", "avg_discount"],
+                    flag_col="category", flag_names=adjusted_categories)
         write_table(region_df, "By Region", pct_cols=["pct_change"],
                     money_cols=["revenue", "profit", "prior_revenue"], plain_pct_cols=["margin", "avg_discount"])
         write_table(discount_product_df, "Discounts by Product", money_cols=["revenue", "profit"],
-                    plain_pct_cols=["avg_discount", "margin"])
+                    plain_pct_cols=["avg_discount", "margin"], flag_col="product", flag_names=adjusted_products)
         write_table(discount_category_df, "Discounts by Category", money_cols=["revenue", "profit"],
-                    plain_pct_cols=["avg_discount", "margin"])
+                    plain_pct_cols=["avg_discount", "margin"], flag_col="category", flag_names=adjusted_categories)
         write_table(flags_df, "Flags")
 
 
@@ -182,18 +212,34 @@ def _df_to_table(df, columns, headers, formatters):
     return f"<table><thead><tr>{thead}</tr></thead><tbody>{''.join(rows_html)}</tbody></table>"
 
 
+def render_dq_banner(issues=(), halts=()):
+    """Build the 3-tier data-quality banner: HALT (red) / WARN (yellow) / SKIP (gray)."""
+    if not issues and not halts:
+        return ""
+
+    warn_issues = [i for i in issues if i["level"] == "warn"]
+    skip_issues = [i for i in issues if i["level"] == "skip"]
+
+    rows = []
+    for h in halts:
+        rows.append(f'<div class="dq-halt">🚫 <strong>HALT:</strong> {h}</div>')
+    if warn_issues:
+        summary = "; ".join(w["message"] for w in warn_issues)
+        rows.append(f'<div class="dq-warn">⚠️ <strong>{len(warn_issues)} warning(s)</strong> — {summary}</div>')
+    if skip_issues:
+        total_skipped = sum(s["count"] for s in skip_issues)
+        summary = "; ".join(s["message"] for s in skip_issues)
+        rows.append(f'<div class="dq-skip">⬜ <strong>{total_skipped} row(s) skipped</strong> — {summary}</div>')
+
+    return f'<div id="dq-banner">{"".join(rows)}</div>'
+
+
 def write_html(path, summary_text, current_period, prior_period, generated_at,
                 category_df, region_df, discount_product_df, discount_category_df, flags,
-                total_revenue, total_profit, overall_margin, revenue_change, warnings=()):
+                total_revenue, total_profit, overall_margin, revenue_change,
+                issues=(), halts=(), adjusted_products=frozenset(), adjusted_categories=frozenset()):
 
-    data_quality_html = ""
-    if warnings:
-        items = "".join(f"<li>{w}</li>" for w in warnings)
-        data_quality_html = f"""
-      <div class="dataquality">
-        <strong>⚠ Data Quality — {len(warnings)} item(s)</strong>
-        <ul>{items}</ul>
-      </div>"""
+    data_quality_html = render_dq_banner(issues, halts)
 
     stat_tiles = "".join([
         _stat_tile("Total Revenue", _fmt_money(total_revenue), revenue_change),
@@ -217,11 +263,19 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
         },
     )
 
-    def discount_table(df):
+    def discount_table(df, adjusted_names=frozenset()):
+        name_col = "product" if "product" in df.columns else "category"
+
+        def name_fmt(v):
+            if v in adjusted_names:
+                return f'{v} <span class="dq-flag" title="Data adjusted for this row">⚠️ <em>data adjusted</em></span>'
+            return str(v)
+
         return _df_to_table(
-            df, ["product" if "product" in df.columns else "category", "avg_discount", "revenue", "margin", "margin_risk"],
+            df, [name_col, "avg_discount", "revenue", "margin", "margin_risk"],
             ["Name", "Avg Discount", "Revenue", "Margin", "Risk"],
             {
+                name_col: name_fmt,
                 "avg_discount": lambda v: f"{v*100:.1f}%",
                 "revenue": _fmt_money,
                 "margin": lambda v: f"{v*100:.1f}%" if pd.notna(v) else "n/a",
@@ -244,6 +298,9 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
     --border: rgba(11,11,11,0.10); --series-1: #2a78d6;
     --delta-good: #006300; --delta-bad: #d03b3b;
     --status-warning: #fab219; --status-critical: #d03b3b;
+    --dq-halt-bg: #fee2e2; --dq-halt-border: #dc2626; --dq-halt-text: #7f1d1d;
+    --dq-warn-bg: #fef9c3; --dq-warn-border: #ca8a04; --dq-warn-text: #713f12;
+    --dq-skip-bg: #f3f4f6; --dq-skip-border: #6b7280; --dq-skip-text: #374151;
   }}
   @media (prefers-color-scheme: dark) {{
     :root:where(:not([data-theme="light"])) .viz-root {{
@@ -252,6 +309,9 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
       --text-secondary: #c3c2b7; --text-muted: #898781; --gridline: #2c2c2a;
       --border: rgba(255,255,255,0.10); --series-1: #3987e5;
       --delta-good: #0ca30c; --delta-bad: #e66767;
+      --dq-halt-bg: rgba(220,38,38,0.16); --dq-halt-border: #e66767; --dq-halt-text: #ffb4b4;
+      --dq-warn-bg: rgba(202,138,4,0.18); --dq-warn-border: #fab219; --dq-warn-text: #ffdd8a;
+      --dq-skip-bg: rgba(255,255,255,0.06); --dq-skip-border: #898781; --dq-skip-text: #c3c2b7;
     }}
   }}
   :root[data-theme="dark"] .viz-root {{
@@ -260,6 +320,9 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
     --text-secondary: #c3c2b7; --text-muted: #898781; --gridline: #2c2c2a;
     --border: rgba(255,255,255,0.10); --series-1: #3987e5;
     --delta-good: #0ca30c; --delta-bad: #e66767;
+    --dq-halt-bg: rgba(220,38,38,0.16); --dq-halt-border: #e66767; --dq-halt-text: #ffb4b4;
+    --dq-warn-bg: rgba(202,138,4,0.18); --dq-warn-border: #fab219; --dq-warn-text: #ffdd8a;
+    --dq-skip-bg: rgba(255,255,255,0.06); --dq-skip-border: #898781; --dq-skip-text: #c3c2b7;
   }}
   * {{ box-sizing: border-box; }}
   body {{ margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -269,12 +332,12 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
   .meta {{ color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 24px; }}
   .summary {{ background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
               padding: 18px 20px; line-height: 1.55; margin-bottom: 28px; }}
-  .dataquality {{ background: var(--surface-1); border: 1px solid var(--border);
-                  border-left: 4px solid var(--status-warning); border-radius: 10px;
-                  padding: 14px 20px; margin-bottom: 28px; font-size: 0.9rem;
-                  color: var(--text-secondary); }}
-  .dataquality ul {{ margin: 8px 0 0; padding-left: 18px; }}
-  .dataquality li {{ margin: 2px 0; }}
+  #dq-banner {{ margin-bottom: 28px; }}
+  .dq-halt, .dq-warn, .dq-skip {{ border-radius: 8px; padding: 10px 16px; margin-bottom: 6px; font-size: 0.88rem; }}
+  .dq-halt {{ background: var(--dq-halt-bg); border-left: 4px solid var(--dq-halt-border); color: var(--dq-halt-text); }}
+  .dq-warn {{ background: var(--dq-warn-bg); border-left: 4px solid var(--dq-warn-border); color: var(--dq-warn-text); }}
+  .dq-skip {{ background: var(--dq-skip-bg); border-left: 4px solid var(--dq-skip-border); color: var(--dq-skip-text); }}
+  .dq-flag {{ cursor: help; color: var(--status-warning); font-size: 0.85em; margin-left: 4px; }}
   h2 {{ font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.04em;
         color: var(--text-secondary); margin: 36px 0 12px; }}
   .stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
@@ -336,10 +399,10 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
   {region_table}
 
   <h2>Biggest Discounts by Product</h2>
-  {discount_table(discount_product_df)}
+  {discount_table(discount_product_df, adjusted_products)}
 
   <h2>Biggest Discounts by Category</h2>
-  {discount_table(discount_category_df)}
+  {discount_table(discount_category_df, adjusted_categories)}
 
   <h2>Flags</h2>
   {flags_html}
@@ -357,8 +420,15 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
 def main():
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
-    data, warnings = common.load_data()
+    data, issues, halts = common.load_data()
     current_df, prior_df, current_period, prior_period = common.split_periods(data)
+
+    adjusted_products = set()
+    adjusted_categories = set()
+    for i in issues:
+        if i["level"] == "warn":
+            adjusted_products.update(i.get("products", []))
+            adjusted_categories.update(i.get("categories", []))
 
     category_df = analysis.category_summary(current_df, prior_df)
     region_df = analysis.region_summary(current_df, prior_df)
@@ -384,12 +454,13 @@ def main():
 
     write_excel(xlsx_path, summary_text, current_period, prior_period,
                 category_df, region_df, discount_product_df, discount_category_df, flags_df,
-                warnings)
+                issues, halts, adjusted_products, adjusted_categories)
 
     write_html(html_path, summary_text, current_period, prior_period,
                datetime.now().strftime("%Y-%m-%d %H:%M"),
                category_df, region_df, discount_product_df, discount_category_df, flags,
-               total_revenue, total_profit, overall_margin, revenue_change, warnings)
+               total_revenue, total_profit, overall_margin, revenue_change,
+               issues, halts, adjusted_products, adjusted_categories)
 
     shutil.copyfile(xlsx_path, os.path.join(REPORTS_DIR, "latest.xlsx"))
     shutil.copyfile(html_path, os.path.join(REPORTS_DIR, "latest.html"))
@@ -397,10 +468,15 @@ def main():
     print(f"Report generated for {current_period} (prior: {prior_period}).")
     print(f"  Excel: {xlsx_path}")
     print(f"  HTML:  {html_path}")
-    if warnings:
-        print(f"\nData quality warnings ({len(warnings)}):")
-        for w in warnings:
-            print(f"  - {w}")
+    if halts:
+        print(f"\nHALT — {len(halts)} file(s) rejected:")
+        for h in halts:
+            print(f"  🚫 {h}")
+    if issues:
+        print(f"\nData quality issues ({len(issues)}):")
+        for i in issues:
+            icon = "⚠" if i["level"] == "warn" else "⬜"
+            print(f"  {icon} {i['message']}")
     print(f"  Also updated: reports/latest.xlsx and reports/latest.html")
 
 

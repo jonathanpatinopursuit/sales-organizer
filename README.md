@@ -50,15 +50,22 @@ Every file is validated on intake (`scripts/validate_data.py`) before it's used:
 
 | Problem | What happens |
 |---|---|
-| A required column is missing | **Halts** — that file is rejected with a clear error naming the missing column(s) |
-| More than 5% of rows have an unparseable/blank date | **Halts** — usually means the wrong column or a format the parser doesn't recognize |
+| A required column is missing | **Halts** — that file is rejected with a clear error naming the missing column(s); other files in `data/` still process normally |
+| More than 5% of rows have an unparseable/blank date | **Halts** — usually means the wrong column or a format the parser doesn't recognize; other files still process normally |
 | A few rows (≤5%) have an unparseable/blank date | Those rows are **skipped**, rest of the file is used |
 | A row has zero/negative quantity or a negative price | That row is **skipped** |
 | A discount is outside 0–100% | **Clamped** to the nearest valid bound |
 | Duplicate rows (within a file, or the same export saved under two filenames) | **Flagged only** — nothing is removed automatically, since legitimate repeat orders can look identical |
 
-Anything skipped or clamped shows up in a "Data Quality" banner at the top of
-the report (and printed to the console), so problems are visible instead of
+A halted file doesn't stop the run — it's excluded and the report still
+generates from whatever files are valid (or, if every file halted, a report
+still generates with $0 across the board and the banner explaining why).
+Anything halted, skipped, or clamped shows up in a tiered "Data Quality"
+banner at the top of the report (🚫 halt / ⚠ warning / ⬜ skipped, printed to
+the console too), and rows whose discount was clamped or are duplicates get
+an inline "⚠ data adjusted" flag next to that specific product/category in
+the Discounts tables — not just an aggregate count — so problems are visible
+instead of
 silently changing your numbers.
 
 ## Adding new data
