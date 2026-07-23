@@ -263,10 +263,15 @@ def render_dq_banner(issues=(), halts=()):
     return f'<div id="dq-banner">{"".join(rows)}</div>'
 
 
-def write_html(path, summary_text, current_period, prior_period, generated_at,
-                category_df, region_df, discount_product_df, discount_category_df, flags,
-                total_revenue, total_profit, overall_margin, revenue_change,
-                issues=(), halts=()):
+def render_html(summary_text, current_period, prior_period, generated_at,
+                 category_df, region_df, discount_product_df, discount_category_df, flags,
+                 total_revenue, total_profit, overall_margin, revenue_change,
+                 issues=(), halts=()) -> str:
+    """Build the full HTML report and return it as a string. write_html()
+    below is a thin wrapper that also saves it to disk -- this function is
+    what app.py (the Streamlit UI) calls directly to embed the same report
+    in the browser without writing a file, reusing 100% of this rendering
+    logic rather than reimplementing it with different widgets."""
 
     data_quality_html = render_dq_banner(issues, halts)
 
@@ -436,6 +441,20 @@ def write_html(path, summary_text, current_period, prior_period, generated_at,
 </body>
 </html>"""
 
+    return html
+
+
+def write_html(path, summary_text, current_period, prior_period, generated_at,
+                category_df, region_df, discount_product_df, discount_category_df, flags,
+                total_revenue, total_profit, overall_margin, revenue_change,
+                issues=(), halts=()):
+    """Render the HTML report and save it to `path` (used by the CLI)."""
+    html = render_html(
+        summary_text, current_period, prior_period, generated_at,
+        category_df, region_df, discount_product_df, discount_category_df, flags,
+        total_revenue, total_profit, overall_margin, revenue_change,
+        issues, halts,
+    )
     with open(path, "w") as f:
         f.write(html)
 
