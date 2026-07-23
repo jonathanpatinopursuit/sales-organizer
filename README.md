@@ -20,6 +20,8 @@ python3 -m pip install -r requirements.txt   # first time only
 If anything's wrong with your file, the terminal and the top of the report
 will say exactly what's wrong and how to fix it.
 
+Prefer a browser to the command line? See [Web UI (Streamlit)](#web-ui-streamlit) below.
+
 **Live report:** https://jonathanpatinopursuit.github.io/sales/
 (publishing this is a manual step — see [Publishing the live report](#publishing-the-live-report) —
 so it only ever shows a report you've explicitly chosen to make public.)
@@ -128,6 +130,40 @@ The Excel workbook has one sheet per section (Summary, By Category, By
 Region, Discounts by Product, Discounts by Category, Flags); the HTML report
 is a single self-contained file.
 
+## Web UI (Streamlit)
+
+`app.py` is a browser-based alternative to the command line: upload a file
+instead of dropping it into `data/`, and the report renders on the page
+immediately (plus download buttons for the Excel/HTML files). It runs the
+exact same `common.py` / `analysis.py` / `generate_report.py` code as the
+CLI, so the report is identical either way — nothing is reimplemented.
+
+Run locally:
+
+```bash
+python3 -m pip install -r requirements.txt   # first time only
+streamlit run app.py
+```
+
+This opens the app at `http://localhost:8501`.
+
+**Deploying to Streamlit Community Cloud** (this is a manual step you do
+once via Streamlit's own site, the same way [publishing the live
+report](#publishing-the-live-report) is a manual step — nothing here
+deploys automatically):
+
+1. Push this repo to GitHub (already done — it's this repo).
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in, and
+   click **New app**.
+3. Point it at this repo, branch `main`, main file path `app.py`.
+4. Streamlit Cloud installs everything from `requirements.txt`
+   automatically — no extra configuration needed.
+
+One difference from the CLI: the web UI processes one uploaded file at a
+time. The CLI can combine multiple weekly exports at once from `data/` (see
+[Adding new data](#adding-new-data)); upload them one at a time here, or use
+`./run.sh` locally if you need to combine several.
+
 ## Publishing the live report
 
 This repo is **public**, so `reports/` is deliberately gitignored — nothing
@@ -149,6 +185,7 @@ https://jonathanpatinopursuit.github.io/sales/. Only run this when
 ```
 sales/
 ├── run.sh              generates the report -- the only command you need
+├── app.py              Streamlit web UI (upload a file, see the report in a browser)
 ├── data/              your weekly Excel exports (gitignored, drop files here)
 ├── reports/            generated reports land here (gitignored, drop files here)
 ├── scripts/
@@ -158,7 +195,7 @@ sales/
 │   ├── validate_data.py     intake validation (bad dates, bad rows, discounts, dupes)
 │   ├── test_validation.py   test suite for validate_data.py
 │   └── create_sample_data.py  writes a synthetic two-month sample export
-├── requirements.txt
+├── requirements.txt   (also read by Streamlit Community Cloud at deploy time)
 └── README.md
 ```
 
@@ -170,6 +207,7 @@ sales/
 2. **Alerts.** Have the script post to Slack or send an email automatically
    whenever a new `critical` flag appears (e.g. a region down >30%, or a
    category running negative profit).
-3. **A live dashboard.** Swap the static HTML report for a small always-on
-   dashboard (e.g. Streamlit or a simple web app) so you can filter by date
-   range, region, or category interactively instead of regenerating files.
+3. **Interactive filtering in the web UI.** `app.py` currently renders the
+   same static report the CLI produces; adding filter widgets (date range,
+   region, category) that recompute `analysis.py`'s tables live would turn
+   it into more of a dashboard instead of a one-shot upload-and-view.
