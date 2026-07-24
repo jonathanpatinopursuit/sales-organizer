@@ -1,9 +1,15 @@
 # Sales Organizer
 
-Sales Organizer ingests your weekly sales order exports (Excel) and automatically
+Sales Organizer ingests your weekly sales order exports and automatically
 builds the sales summary a Sales Coordinator would otherwise put together by hand:
 totals by category, region performance vs. the prior period, discount/margin risk,
 underperformance flags, and a plain-language summary.
+
+It accepts `.xlsx`, `.xls`, `.csv`, and `.tsv` files, and understands two
+different column layouts out of the box — a raw, unclean export (currency
+symbols, `%` signs, an order-ID column) doesn't need any prep first. See
+[Expected input file format](#expected-input-file-format) for exactly what's
+needed.
 
 ## Quick start
 
@@ -12,7 +18,7 @@ python3 -m pip install -r requirements.txt   # first time only
 ./run.sh
 ```
 
-1. Drop your weekly `.xlsx` export into `data/`.
+1. Drop your weekly export (`.xlsx`, `.xls`, `.csv`, or `.tsv`) into `data/`.
 2. Run `./run.sh`.
 3. Open **`reports/latest.html`** (or `reports/latest.xlsx` in Excel) — always
    the newest report, same filename every time.
@@ -31,8 +37,10 @@ so it only ever shows a report you've explicitly chosen to make public.)
 
 ## What it does
 
-Point it at one or more weekly Excel exports and it will:
+Point it at one or more weekly exports and it will:
 
+- Auto-detect and clean a messy raw export (currency/percent strings, an
+  order-ID column) into report-ready data — no manual prep required
 - Total sales by product category
 - Compare sales by region, current period vs. prior period (% change)
 - Surface which products/categories are being discounted the most, and whether
@@ -46,8 +54,15 @@ exports, the report automatically rolls forward.
 
 ## Expected input file format
 
-Drop `.xlsx` files into `data/`. Each file needs these columns (case-insensitive,
-any column order):
+Drop a `.xlsx`, `.xls`, `.csv`, or `.tsv` file into `data/` (CSV/TSV delimiters
+are auto-detected, so either extension works either way). Two column layouts
+are supported — which one a file is in is detected from its actual column
+headers, not its file extension or name, so either layout can be saved as any
+of the four file types.
+
+### 1. Clean format
+
+Case-insensitive column names, any column order, values already numeric:
 
 | column     | description                                             |
 |------------|----------------------------------------------------------|
@@ -63,6 +78,33 @@ any column order):
 
 Revenue is derived as `quantity * price * (1 - discount)`. You don't need to
 compute revenue yourself.
+
+### 2. Raw export format
+
+Also accepted, unmodified, straight from a system that exports messier data —
+currency/percent formatting baked into strings, an order-ID column, inconsistent
+capitalization. A file is recognized as this format when it has all of these
+headers (case-insensitive):
+
+| raw column         | maps to    | cleaning applied                                          |
+|---------------------|------------|-------------------------------------------------------------|
+| `Order_ID`          | *(dropped)* | used only to flag a reused ID across two different orders, then discarded — not part of the report |
+| `Order_Date`        | `date`     | —                                                             |
+| `Customer_Name`     | `customer` | —                                                             |
+| `Product`           | `product`  | —                                                             |
+| `Product_Category`  | `category` | capitalization normalized (`"electronics"` and `"Electronics"` become one group) |
+| `Region`            | `region`   | capitalization normalized                                    |
+| `Units_Sold`        | `quantity` | —                                                             |
+| `Unit_Price`        | `price`    | `"$3,600.00"` → `3600.00`                                    |
+| `Discount_Pct`      | `discount` | `"10%"` → `0.10`                                              |
+| `Profit`            | `profit`   | `"--$3,600.00"` (this export's minus sign) → `-3600.00`      |
+
+Once cleaned, this goes through the exact same validation and analysis as the
+clean format — nothing downstream needs to know which layout a row came from.
+
+Not sure which format your export is, or don't have a real export handy yet?
+Run `python3 scripts/create_sample_data.py` (see [Adding new
+data](#adding-new-data)) to generate a working clean-format example.
 
 ## Data quality checks
 
@@ -107,7 +149,8 @@ once) — it prints a ✅/❌ per assertion and exits non-zero on failure.
 
 ## Adding new data
 
-Every week, just drop your new export (`.xlsx`) into `data/`. You can keep old
+Every week, just drop your new export (`.xlsx`, `.xls`, `.csv`, or `.tsv`, in
+either the clean or raw column layout) into `data/`. You can keep old
 exports there too — multiple files are combined automatically, and duplicate
 weeks simply add up. Nothing in `data/` is tracked by git (see `.gitignore`),
 so this is safe to do without worrying about committing spreadsheets.
@@ -189,10 +232,11 @@ https://jonathanpatinopursuit.github.io/sales/. Only run this when
 sales/
 ├── run.sh              generates the report -- the only command you need
 ├── app.py              Streamlit web UI (upload a file, see the report in a browser)
-├── data/              your weekly Excel exports (gitignored, drop files here)
+├── data/              your weekly exports (gitignored, drop files here)
 ├── reports/            generated reports land here (gitignored, drop files here)
 ├── scripts/
-│   ├── common.py        loads & normalizes data/*.xlsx
+│   ├── common.py        loads & normalizes data/*.{xlsx,xls,csv,tsv}
+│   ├── clean_raw_export.py  detects & cleans the messy raw-export column layout
 │   ├── analysis.py       category/region/discount/flag calculations (shared)
 │   ├── generate_report.py   builds the Excel + HTML report
 │   ├── validate_data.py     intake validation (bad dates, bad rows, discounts, dupes)
